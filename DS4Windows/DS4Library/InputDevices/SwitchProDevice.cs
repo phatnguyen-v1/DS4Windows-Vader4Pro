@@ -214,6 +214,8 @@ namespace DS4Windows.InputDevices
         public bool EnableHomeLED { get => enableHomeLED; set => enableHomeLED = value; }
 
         private SwitchProControllerOptions nativeOptionsStore;
+        private GyroCaptureWriter<SwitchProGyroCapture.Sample> gyroCapture;
+        private readonly SwitchProMotionClock motionClock = new SwitchProMotionClock();
 
         /// <summary>
         /// Flag to tell methods if device has been successfully initialized and opened
@@ -379,12 +381,14 @@ namespace DS4Windows.InputDevices
                 long latencySum = 0;
 
                 long previousCheckTime = 0;
+                int skippedReports = 0;
                 long deltaCheckElapsed;
                 double lastCheckElapsed;
                 double lastCheckTimeElapsed;
 
                 // Run continuous calibration on Gyro when starting input loop
                 sixAxis.ResetContinuousCalibration();
+                motionClock.Reset();
                 standbySw.Start();
 
                 while (!exitInputThread)
@@ -443,6 +447,7 @@ namespace DS4Windows.InputDevices
                     // Check if most recent poll exceeded a certain duration. Avoids false poll state?
                     if (lastCheckTimeElapsed <= 0.005)
                     {
+                        skippedReports++;
                         continue;
                     }
 
@@ -467,8 +472,11 @@ namespace DS4Windows.InputDevices
                     cState.FrameCounter = (byte)(cState.PacketCounter % 128);
                     cState.ReportTimeStamp = utcNow;
 
-                    cState.elapsedTime = elapsedDeltaTime;
-                    cState.totalMicroSec = pState.totalMicroSec + (uint)(elapsedDeltaTime * 1000000);
+                    // Motion timing follows the controller timer, not Bluetooth arrival
+                    motionClock.Advance(inputReportBuffer[1], elapsedDeltaTime);
+                    cState.elapsedTime = motionClock.ElapsedSeconds;
+                    cState.totalMicroSec = motionClock.TotalMicroseconds;
+                    cState.ds4Timestamp = motionClock.Timestamp;
                     combLatency = 0.0;
 
                     if ((this.featureSet & VidPidFeatureSet.NoBatteryReading) == 0)
@@ -551,6 +559,7 @@ namespace DS4Windows.InputDevices
                     //cState.RY = (byte)((tempAxis - STICK_MIN) / (STICK_MAX - STICK_MIN) * 255);
                     cState.RY = (byte)((((tempAxis - rightStickYData.min) / (double)(rightStickYData.max - rightStickYData.min) - 0.5) * -1.0 + 0.5) * 255);
 
+                    UpdateGyroCapture();
                     for (int i = 0; i < 3; i++)
                     {
                         int data_offset = i * 12;
@@ -571,11 +580,34 @@ namespace DS4Windows.InputDevices
                         //gyro_out[IMU_ROLL_IDX + gyro_offset] = (short)(tempShort - device.gyroBias[IMU_ROLL_IDX]);
                         gyro_out[IMU_ROLL_IDX + gyro_offset] = (short)(tempShort);
 
+                        if (gyroCapture != null)
+                        {
+                            gyroCapture.Record(new SwitchProGyroCapture.Sample
+                            {
+                                HostMicroseconds = (ulong)(curtime * (1_000_000.0 / Stopwatch.Frequency)),
+                                UtcMilliseconds = new DateTimeOffset(utcNow).ToUnixTimeMilliseconds(),
+                                ElapsedSeconds = elapsedDeltaTime,
+                                MotionElapsedSeconds = motionClock.ElapsedSeconds,
+                                SkippedReports = skippedReports,
+                                Timer = inputReportBuffer[1],
+                                ImuIndex = (byte)i,
+                                YawRaw = gyro_raw[IMU_YAW_IDX + gyro_offset],
+                                PitchRaw = gyro_raw[IMU_PITCH_IDX + gyro_offset],
+                                RollRaw = gyro_raw[IMU_ROLL_IDX + gyro_offset],
+                                AccelXRaw = accel_raw[IMU_XAXIS_IDX],
+                                AccelYRaw = accel_raw[IMU_YAXIS_IDX],
+                                AccelZRaw = accel_raw[IMU_ZAXIS_IDX],
+                                Used = i == 2,
+                            });
+                        }
+
                         //Console.WriteLine($"IDX: ({i}) Accel: X({accel_raw[IMU_XAXIS_IDX]}) Y({accel_raw[IMU_YAXIS_IDX]}) Z({accel_raw[IMU_ZAXIS_IDX]})");
                         //Console.WriteLine($"IDX: ({i}) Gyro: Yaw({gyro_raw[IMU_YAW_IDX + gyro_offset]}) Pitch({gyro_raw[IMU_PITCH_IDX + gyro_offset]}) Roll({gyro_raw[IMU_ROLL_IDX + gyro_offset]})");
                         //Console.WriteLine($"IDX: ({i}) Gyro OUT: Yaw({gyro_out[IMU_YAW_IDX + gyro_offset]}) Pitch({gyro_out[IMU_PITCH_IDX + gyro_offset]}) Roll({gyro_out[IMU_ROLL_IDX + gyro_offset]})");
                         //Console.WriteLine();
                     }
+
+                    skippedReports = 0;
 
                     // For Accel, just use most recent sampled values
                     int accelX = accel_raw[IMU_XAXIS_IDX];
@@ -597,7 +629,7 @@ namespace DS4Windows.InputDevices
                     tempMotion.gyroYawFull = gyroYaw; tempMotion.gyroPitchFull = -gyroPitch; tempMotion.gyroRollFull = gyroRoll;
                     tempMotion.accelXFull = accelX * 2; tempMotion.accelYFull = -accelZ * 2; tempMotion.accelZFull = -accelY * 2;
 
-                    tempMotion.elapsed = elapsedDeltaTime;
+                    tempMotion.elapsed = cState.elapsedTime;
                     tempMotion.previousAxis = pState.Motion;
                     tempMotion.gyroYaw = gyroYaw / 256; tempMotion.gyroPitch = -gyroPitch / 256; tempMotion.gyroRoll = gyroRoll / 256;
                     tempMotion.accelX = accelX / 31; tempMotion.accelY = -accelZ / 31; tempMotion.accelZ = -accelY / 31;
@@ -702,7 +734,41 @@ namespace DS4Windows.InputDevices
                 }
             }
 
+            StopGyroCapture();
             timeoutExecuted = true;
+        }
+
+        private void UpdateGyroCapture()
+        {
+            bool wanted = nativeOptionsStore.CaptureGyroLog;
+            if (wanted && gyroCapture == null)
+            {
+                try
+                {
+                    gyroCapture = SwitchProGyroCapture.Start(
+                        System.IO.Path.Combine(Global.appdatapath, "SwitchProGyroCapture"), Mac);
+                    AppLogger.LogToGui($"Switch Pro gyro capture started: {gyroCapture.FilePath}", false);
+                }
+                catch (Exception e) when (e is System.IO.IOException || e is UnauthorizedAccessException)
+                {
+                    nativeOptionsStore.CaptureGyroLog = false;
+                    AppLogger.LogToGui($"Switch Pro gyro capture failed to start: {e.Message}", true);
+                }
+            }
+            else if (!wanted && gyroCapture != null)
+            {
+                StopGyroCapture();
+            }
+        }
+
+        private void StopGyroCapture()
+        {
+            if (gyroCapture == null)
+                return;
+            string path = gyroCapture.FilePath;
+            gyroCapture.Dispose();
+            gyroCapture = null;
+            AppLogger.LogToGui($"Switch Pro gyro capture saved: {path}", false);
         }
 
         public void SetOperational()

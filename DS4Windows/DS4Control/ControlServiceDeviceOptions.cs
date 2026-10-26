@@ -359,6 +359,20 @@ namespace DS4Windows
         }
         public event EventHandler EnableHomeLEDChanged;
 
+        // Runtime only, not persisted: a capture should not resume after restart.
+        private volatile bool captureGyroLog;
+        public bool CaptureGyroLog
+        {
+            get => captureGyroLog;
+            set
+            {
+                if (captureGyroLog == value) return;
+                captureGyroLog = value;
+                CaptureGyroLogChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler CaptureGyroLogChanged;
+
         public SwitchProControllerOptions(InputDeviceType deviceType) : base(deviceType)
         {
         }
@@ -581,6 +595,35 @@ namespace DS4Windows
     public class Vader4ProControllerOptions : ControllerOptionsStore
     {
         public const string XML_ELEMENT_NAME = "Vader4ProSupportSettings";
+
+        public const int DefaultGyroSmoothingMilliseconds = 16;
+        private volatile int gyroSmoothingMilliseconds = DefaultGyroSmoothingMilliseconds;
+        public int GyroSmoothingMilliseconds
+        {
+            get => gyroSmoothingMilliseconds;
+            set
+            {
+                int clamped = Math.Clamp(value, 0, 40);
+                if (gyroSmoothingMilliseconds == clamped) return;
+                gyroSmoothingMilliseconds = clamped;
+                GyroSmoothingMillisecondsChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler GyroSmoothingMillisecondsChanged;
+
+        // Runtime only, not persisted: a capture should not resume after restart.
+        private volatile bool captureGyroLog;
+        public bool CaptureGyroLog
+        {
+            get => captureGyroLog;
+            set
+            {
+                if (captureGyroLog == value) return;
+                captureGyroLog = value;
+                CaptureGyroLogChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public event EventHandler CaptureGyroLogChanged;
 
         private bool enableHomeLED = true;
         public bool EnableHomeLED

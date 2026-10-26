@@ -1478,4 +1478,19 @@ Please click OK to confirm that you have read the message. Press Cancel to be re
   <data name="InverseMotors" xml:space="preserve">
     <value>Inverse motors</value>
   </data>
+  <data name="VaderGyroSmoothing" xml:space="preserve">
+    <value>Gyro smoothing</value>
+  </data>
+  <data name="VaderGyroSmoothingHelp" xml:space="preserve">
+    <value>Higher values steady fine aiming but add delay. 0 turns smoothing off; 16 is the default. Fast turns use less smoothing. Changes apply immediately.</value>
+  </data>
+  <data name="VaderGyroCapture" xml:space="preserve">
+    <value>Capture raw gyro to CSV</value>
+  </data>
+  <data name="SwitchProGyroCaptureHelp" xml:space="preserve">
+    <value>Records every IMU sample (three per report) with timing to the SwitchProGyroCapture folder in the DS4Windows settings folder. Turns off when DS4Windows restarts.</value>
+  </data>
+  <data name="VaderGyroCaptureHelp" xml:space="preserve">
+    <value>Records every report (raw and smoothed gyro, timing, full report bytes) to the VaderGyroCapture folder in the DS4Windows settings folder. Turns off when DS4Windows restarts. Uses about 10 MB per minute.</value>
+  </data>
 </root>

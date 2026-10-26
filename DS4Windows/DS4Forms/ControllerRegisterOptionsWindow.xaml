@@ -87,6 +87,10 @@
                         <TextBlock Text="*" Foreground="Red" />
                         <CheckBox Content="{lex:Loc ControllerRegOptWin.EnableHomeLED}" IsChecked="{Binding Options.EnableHomeLED, FallbackValue='False'}" Margin="8,0,0,0" />
                     </StackPanel>
+                    <CheckBox Content="{lex:Loc VaderGyroCapture}" Margin="0,16,0,0"
+                              IsChecked="{Binding Options.CaptureGyroLog, Mode=TwoWay}" />
+                    <TextBlock Text="{lex:Loc SwitchProGyroCaptureHelp}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </TabItem>
 
@@ -117,6 +121,24 @@
                         <TextBlock Text="*" Foreground="Red" Margin="0,0,8,0" VerticalAlignment="Center" />
                         <CheckBox Content="{lex:Loc ControllerRegOptWin.EnableHomeLED}" IsChecked="{Binding Options.EnableHomeLED, FallbackValue='False'}" />
                     </StackPanel>
+                </StackPanel>
+            </TabItem>
+            <TabItem x:Name="vader4ProOptsTabItem" Header="Vader 4 Pro" Visibility="Collapsed">
+                <StackPanel Visibility="{Binding Visible, Converter={StaticResource BooleanToVisibilityConverter}}" Margin="4">
+                    <TextBlock Text="{lex:Loc VaderGyroSmoothing}" FontWeight="Bold" />
+                    <DockPanel Margin="0,8,0,0">
+                        <TextBlock DockPanel.Dock="Right" Width="55" Margin="8,0,0,0"
+                                   Text="{Binding Options.GyroSmoothingMilliseconds, StringFormat={}{0} ms}" />
+                        <Slider Minimum="0" Maximum="40" TickFrequency="1" IsSnapToTickEnabled="True"
+                                Value="{Binding Options.GyroSmoothingMilliseconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                AutomationProperties.Name="{lex:Loc VaderGyroSmoothing}" />
+                    </DockPanel>
+                    <TextBlock Text="{lex:Loc VaderGyroSmoothingHelp}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                    <CheckBox Content="{lex:Loc VaderGyroCapture}" Margin="0,16,0,0"
+                              IsChecked="{Binding Options.CaptureGyroLog, Mode=TwoWay}" />
+                    <TextBlock Text="{lex:Loc VaderGyroCaptureHelp}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </TabItem>
         </TabControl>

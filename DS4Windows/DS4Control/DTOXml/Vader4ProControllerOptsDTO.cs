@@ -29,6 +29,8 @@ namespace DS4WinWPF.DS4Control.DTOXml
     [XmlRoot(Vader4ProControllerOptions.XML_ELEMENT_NAME)]
     public class Vader4ProControllerOptsDTO : IDTO<Vader4ProControllerOptions>
     {
+        public int GyroSmoothingMilliseconds { get; set; } = Vader4ProControllerOptions.DefaultGyroSmoothingMilliseconds;
+
         [XmlElement("EnableHomeLED")]
         public string EnableHomeLEDString
         {
@@ -48,11 +50,13 @@ namespace DS4WinWPF.DS4Control.DTOXml
         public void MapFrom(Vader4ProControllerOptions source)
         {
             EnableHomeLED = source.EnableHomeLED;
+            GyroSmoothingMilliseconds = source.GyroSmoothingMilliseconds;
         }
 
         public void MapTo(Vader4ProControllerOptions destination)
         {
             destination.EnableHomeLED = EnableHomeLED;
+            destination.GyroSmoothingMilliseconds = GyroSmoothingMilliseconds;
         }
     }
 }

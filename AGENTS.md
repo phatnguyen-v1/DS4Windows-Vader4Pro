@@ -60,3 +60,27 @@ Allows any controller button to be mapped to a touchpad swipe gesture (Up/Down/L
 3. Release — finger lifts past endpoint (+40px) so the game sees clear velocity vector
 
 Total ~27 active frames (~68ms at 400Hz). The finger never parks stationary — it keeps drifting past the endpoint (clamped to touchpad edges) so velocity is always present at lift, even after a long button hold. Presses arriving during an active swipe are dropped (no queue, no conflicts).
+
+### Vader 4 Pro Gyro (PC/dongle mode)
+
+Measured (see `doc/vader4pro-gyro.md`): yaw/pitch arrive as raw [-512, 512] at 3.9 deg/s
+per step, the IMU updates at 100 Hz on all axes, and HID reports arrive at 500–1000 Hz.
+The 2000 dps scale in `Vader4ProReport.cs` is correct (90° turns integrate to 88–90°).
+
+**Key files:**
+- `DS4Windows/DS4Library/InputDevices/Vader4ProGyroFilter.cs` — Time-based, speed-adaptive EMA on yaw/pitch. Time constant comes from the per-controller **Gyro smoothing** slider (0–40 ms, default 16) in Device Options; fast turns shrink it toward 2 ms. Roll is passthrough.
+- `DS4Windows/DS4Library/InputDevices/Vader4ProReportClock.cs` — Host-clock timing and DS4 timestamp for motion.
+- `DS4Windows/DS4Library/InputDevices/Vader4ProGyroCapture.cs` — Optional CSV capture (Device Options checkbox, runtime only, never persisted).
+
+### Switch Pro Motion Timing
+
+Over Bluetooth or USB, Switch-protocol reports can arrive 8 or 16 ms apart while the
+controller timer (report byte 1) advances at a fixed rate.
+
+**Key files:**
+- `DS4Windows/DS4Library/InputDevices/SwitchProMotionClock.cs` — Paces `elapsedTime`, `totalMicroSec` and `ds4Timestamp` from timer ticks. Tick length is the ratio of decayed host time to decayed ticks (~2 s window), so it stays on the wall clock. Implausible timer steps fall back to host time; stalls over 250 ms add no time.
+- `DS4Windows/DS4Library/InputDevices/SwitchProGyroCapture.cs` — Optional CSV capture, one row per IMU sample.
+- `DS4Windows/DS4Library/InputDevices/GyroCaptureWriter.cs` — Shared background CSV writer for both captures.
+- `tools/vader_gyro_analyze.py` — Summarizes either capture format.
+
+Before this fork the Switch Pro driver never set `ds4Timestamp`, so the virtual DS4 sent a constant motion timestamp.

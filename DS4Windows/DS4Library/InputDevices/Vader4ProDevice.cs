@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Vader4ProReader.Device;
-using System.Buffers.Binary;
 
 namespace DS4Windows.InputDevices
 {
@@ -15,16 +14,10 @@ namespace DS4Windows.InputDevices
         private bool outputDirty = false;
         private DS4HapticState previousHapticState = new DS4HapticState();
         private readonly byte[] reportBuf = new byte[32]; // Pre-allocated to avoid per-frame heap allocation
-        private long syntheticTimestampTicks = 0; // Monotonic synthetic timestamp for DS4 passthru
-
-        // Gyro velocity-adaptive smoothing.
-        // Vader 4 Pro gyro updates at ~100Hz; HID reports at 500-1000Hz.
-        // Smoothing only applies when the raw value actually changes between reports.
-        private short prevYawRaw, prevPitchRaw, prevRollRaw;
-        private float gyroYawSmoothed, gyroPitchSmoothed, gyroRollSmoothed;
-        private bool gyroFirstFrame;
-        private const float GYRO_SMOOTHING_ALPHA = 0.50f;
-        private const float GYRO_FAST_THRESHOLD = 150f; // DS4 units (~9.4 deg/s)
+        private readonly Vader4ProReportClock reportClock = new Vader4ProReportClock();
+        private readonly Vader4ProGyroFilter yawFilter = new Vader4ProGyroFilter();
+        private readonly Vader4ProGyroFilter pitchFilter = new Vader4ProGyroFilter();
+        private GyroCaptureWriter<Vader4ProGyroCapture.Sample> gyroCapture;
 
         private Vader4ProControllerOptions nativeOptionsStore;
         public Vader4ProControllerOptions NativeOptionsStore { get => nativeOptionsStore; }
@@ -48,6 +41,7 @@ namespace DS4Windows.InputDevices
                 Mac = hDevice.GenerateFakeHwSerial();
             }
             deviceType = InputDeviceType.Vader4Pro;
+            optionsStore = nativeOptionsStore = new Vader4ProControllerOptions(deviceType);
             gyroMouseSensSettings = new GyroMouseSens();
             inputReport = new byte[hDevice.Capabilities.InputReportByteLength];
             warnInterval = WARN_INTERVAL_USB;
@@ -113,7 +107,7 @@ namespace DS4Windows.InputDevices
                 NativeMethods.HidD_SetNumInputBuffers(hDevice.SafeReadHandle.DangerousGetHandle(), 2);
                 Queue<long> latencyQueue = new Queue<long>(21); // Set capacity at max + 1 to avoid any resizing
                 int tempLatencyCount = 0;
-                long oldtime = 0;
+                long oldtime;
                 string currerror = string.Empty;
                 long curtime = 0;
                 long testelapsed = 0;
@@ -132,7 +126,10 @@ namespace DS4Windows.InputDevices
                 // window, wrong offsets get computed that reduce effective gyro range.
                 sixAxis.StopContinuousCalibration();
                 standbySw.Start();
-                gyroFirstFrame = true; // reset on thread restart
+                yawFilter.Reset();
+                pitchFilter.Reset();
+                oldtime = Stopwatch.GetTimestamp();
+                reportClock.Reset(oldtime);
 
                 while (!exitInputThread)
                 {
@@ -169,11 +166,20 @@ namespace DS4Windows.InputDevices
                     readWaitEv.Wait();
                     readWaitEv.Reset();
 
+                    // Require a full-size buffer and ignore command reports.
+                    if (inputReport.Length < reportBuf.Length || inputReport[1] != 0xFE)
+                        continue;
+
                     curtime = Stopwatch.GetTimestamp();
                     testelapsed = curtime - oldtime;
                     lastTimeElapsedDouble = testelapsed * (1.0 / Stopwatch.Frequency) * 1000.0;
                     lastTimeElapsed = (long)lastTimeElapsedDouble;
                     oldtime = curtime;
+                    reportClock.Advance(curtime, Stopwatch.Frequency);
+                    elapsedDeltaTime = reportClock.ElapsedSeconds;
+                    cState.elapsedTime = elapsedDeltaTime;
+                    cState.totalMicroSec = reportClock.TotalMicroseconds;
+                    cState.ds4Timestamp = reportClock.Timestamp;
 
                     utcNow = DateTime.UtcNow; // timestamp with UTC in case system time zone changes
 
@@ -228,62 +234,13 @@ namespace DS4Windows.InputDevices
                         cState.FnR = report.IsZPressed;
                         // FN button
                         cState.Capture = report.IsFNPressed;
-                        // Gyro / Accelerometer — velocity-adaptive smoothing.
-                        // Smooths slow movements (reducing quantization stepping) while
-                        // passing fast movements through raw. Only applies when raw value
-                        // actually changes (gyro updates at ~100Hz, HID at 500-1000Hz).
-                        float yawCal = report.YawCalibrated;
-                        float pitchCal = report.PitchCalibrated;
-                        float rollCal = report.RollCalibrated;
-
-                        if (gyroFirstFrame)
-                        {
-                            gyroYawSmoothed = yawCal;
-                            gyroPitchSmoothed = pitchCal;
-                            gyroRollSmoothed = rollCal;
-                            gyroFirstFrame = false;
-                        }
-                        else
-                        {
-                            // Yaw (coarse +/-512 range - smoothing helps)
-                            if (report.YawRaw != prevYawRaw)
-                            {
-                                float delta = yawCal - gyroYawSmoothed;
-                                float alpha;
-                                if (report.YawRaw == 0)
-                                    alpha = 1f; // snap to zero — eliminate EMA decay tail
-                                else
-                                {
-                                    float t = Math.Clamp(Math.Abs(delta) / GYRO_FAST_THRESHOLD, 0f, 1f);
-                                    alpha = GYRO_SMOOTHING_ALPHA + t * (1f - GYRO_SMOOTHING_ALPHA);
-                                }
-                                gyroYawSmoothed += alpha * delta;
-                            }
-                            // Pitch (coarse +/-512 range - smoothing helps)
-                            if (report.PitchRaw != prevPitchRaw)
-                            {
-                                float delta = pitchCal - gyroPitchSmoothed;
-                                float alpha;
-                                if (report.PitchRaw == 0)
-                                    alpha = 1f; // snap to zero — eliminate EMA decay tail
-                                else
-                                {
-                                    float t = Math.Clamp(Math.Abs(delta) / GYRO_FAST_THRESHOLD, 0f, 1f);
-                                    alpha = GYRO_SMOOTHING_ALPHA + t * (1f - GYRO_SMOOTHING_ALPHA);
-                                }
-                                gyroPitchSmoothed += alpha * delta;
-                            }
-                            // Roll (full int16 range - no quantization issue, passthrough)
-                            if (report.RollRaw != prevRollRaw)
-                                gyroRollSmoothed = rollCal;
-                        }
-                        prevYawRaw = report.YawRaw;
-                        prevPitchRaw = report.PitchRaw;
-                        prevRollRaw = report.RollRaw;
-
-                        short yaw = (short)-gyroYawSmoothed;
-                        short pitch = (short)-gyroPitchSmoothed;
-                        short roll = (short)gyroRollSmoothed;
+                        // Smooth every valid report using its current elapsed time.
+                        int smoothing = nativeOptionsStore.GyroSmoothingMilliseconds;
+                        short yaw = Vader4ProGyroFilter.ToInt16(-yawFilter.Filter(
+                            report.YawCalibrated, elapsedDeltaTime, smoothing));
+                        short pitch = Vader4ProGyroFilter.ToInt16(-pitchFilter.Filter(
+                            report.PitchCalibrated, elapsedDeltaTime, smoothing));
+                        short roll = Vader4ProGyroFilter.ToInt16(report.RollCalibrated);
                         short ax = (short)-(report.AccelXCalibrated);
                         short ay = (short)(report.AccelYCalibrated);
                         short az = (short)(report.AccelZCalibrated);
@@ -291,22 +248,32 @@ namespace DS4Windows.InputDevices
                         {
                             sixAxis.handleSixaxisVals(yaw, pitch, roll, ax, ay, az, cState, elapsedDeltaTime);
                         }
+
+                        UpdateGyroCapture();
+                        if (gyroCapture != null)
+                        {
+                            var sample = new Vader4ProGyroCapture.Sample
+                            {
+                                HostMicroseconds = cState.totalMicroSec,
+                                UtcMilliseconds = new DateTimeOffset(utcNow).ToUnixTimeMilliseconds(),
+                                ElapsedSeconds = elapsedDeltaTime,
+                                YawRaw = report.YawRaw,
+                                PitchRaw = report.PitchRaw,
+                                RollRaw = report.RollRaw,
+                                AccelXRaw = report.AccelXRaw,
+                                AccelYRaw = report.AccelYRaw,
+                                AccelZRaw = report.AccelZRaw,
+                                YawOut = yaw,
+                                PitchOut = pitch,
+                                RollOut = roll,
+                                SmoothingMilliseconds = smoothing,
+                            };
+                            sample.SetReport(reportBuf);
+                            gyroCapture.Record(sample);
+                        }
                     }
 
                     cState.Battery = 99;
-
-
-                    // Vader 4 Pro has no hardware timestamp in its HID report.
-                    // Generate a synthetic monotonic timestamp from the system high-res timer
-                    // so DS4 Passthru games see a properly advancing timestamp field.
-                    elapsedDeltaTime = lastTimeElapsedDouble * .001; // ms → seconds
-                    uint elapsedMicro = (uint)(lastTimeElapsedDouble * 1000.0); // ms → microseconds
-                    cState.totalMicroSec = pState.totalMicroSec + elapsedMicro;
-                    cState.elapsedTime = elapsedDeltaTime;
-
-                    // Advance synthetic timestamp (~5.33 µs per tick, matching DS4 convention)
-                    syntheticTimestampTicks += elapsedMicro * 3; // microseconds * 3 to match DS4's 1/3µs tick rate
-                    cState.ds4Timestamp = (ushort)((syntheticTimestampTicks / 16) % ushort.MaxValue);
 
 
                     if (idleTimeout == 0)
@@ -362,7 +329,41 @@ namespace DS4Windows.InputDevices
                 }
 
             }
+            StopGyroCapture();
             timeoutExecuted = true;
+        }
+
+        private void UpdateGyroCapture()
+        {
+            bool wanted = nativeOptionsStore.CaptureGyroLog;
+            if (wanted && gyroCapture == null)
+            {
+                try
+                {
+                    gyroCapture = Vader4ProGyroCapture.Start(
+                        System.IO.Path.Combine(Global.appdatapath, "VaderGyroCapture"), Mac);
+                    AppLogger.LogToGui($"Vader 4 Pro gyro capture started: {gyroCapture.FilePath}", false);
+                }
+                catch (Exception e) when (e is System.IO.IOException || e is UnauthorizedAccessException)
+                {
+                    nativeOptionsStore.CaptureGyroLog = false;
+                    AppLogger.LogToGui($"Vader 4 Pro gyro capture failed to start: {e.Message}", true);
+                }
+            }
+            else if (!wanted && gyroCapture != null)
+            {
+                StopGyroCapture();
+            }
+        }
+
+        private void StopGyroCapture()
+        {
+            if (gyroCapture == null)
+                return;
+            string path = gyroCapture.FilePath;
+            gyroCapture.Dispose();
+            gyroCapture = null;
+            AppLogger.LogToGui($"Vader 4 Pro gyro capture saved: {path}", false);
         }
 
 

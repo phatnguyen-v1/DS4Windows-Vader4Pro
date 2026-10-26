@@ -1,27 +1,40 @@
-# DS4Windows
+# DS4Windows (Vader 4 Pro fork)
 
-Like those other DS4 tools, but sexier.
+A continuation of DS4Windows with native support for the **Flydigi Vader 4 Pro** and
+better motion (gyro) handling for Switch Pro protocol controllers.
 
-DS4Windows is an extract anywhere program that allows you to get the best
-DualShock 4 experience on your PC. By emulating an Xbox 360 controller, many
-more games are accessible. Other input controllers are also supported including the
-DualSense, Switch Pro, and JoyCon controllers (**first party hardware only**).
-
-This project is a fork of the work of Jays2Kings and Ryochan7. It adds various new features like switch 
-[debouncing](https://www.ganssle.com/debouncing.pdf), a tool that helps to fix stick drift, pitch and roll simulation
-for DS3 based on accelerometer value (which is a work of [sunnyqeen](https://github.com/sunnyqeen)), and
-**touchpad swipe mapping** — allowing any controller button to simulate touchpad swipe gestures (Up/Down/Left/Right).
+DS4Windows is an extract anywhere program that lets you use a DualShock 4, DualSense,
+Switch Pro, JoyCon, and now a Vader 4 Pro on PC by emulating a DualShock 4 or Xbox 360
+controller.
 
 ![DS4Windows Preview](https://raw.githubusercontent.com/Ryochan7/DS4Windows/jay/ds4winwpf_screen_20200412.png)
 
 ## About this fork
 
-I've made this fork because some of the buttons on my controller started bouncing. Normally I would just add a
-feature that would fix my problem, make a pull request to the original repo and forget about the project. 
-The issue here is that Ryochan7 stopped maintaining the original project, so I decided to make slight 
-modifications to the code that detects if the installed version is up-to-date, so it now pulls version info from my 
-repo. This way if you install my version, you don't get the annoying popup saying your version is outdated. If there 
-are any feature requests, I'm more than happy to at least look at them and assess whether I could add them.
+This is a fork of [schmaldeo/DS4Windows](https://github.com/schmaldeo/DS4Windows), which itself
+continued the work of Jays2Kings and Ryochan7. schmaldeo
+[discontinued that project](https://github.com/schmaldeo/DS4Windows#discontinuation) in March 2026;
+this fork contains all of its code changes.
+
+Inherited from schmaldeo: switch [debouncing](https://www.ganssle.com/debouncing.pdf), a stick
+drift helper, and DS3 pitch/roll simulation from the accelerometer (work of
+[sunnyqeen](https://github.com/sunnyqeen)).
+
+Added in this fork:
+
+- **Flydigi Vader 4 Pro (PC/dongle mode):** native input including back paddles and C/Z,
+  analog triggers, rumble and LED; gyro smoothing adjustable per controller in Device Options.
+- **Switch Pro protocol motion timing:** gyro time is paced from the controller's own timer
+  instead of Bluetooth/USB arrival time, and the virtual DS4 now receives a real motion
+  timestamp. This also benefits a Vader 4 Pro used in Switch mode.
+- **Touchpad swipe mapping:** any button can perform a touchpad swipe (Up/Down/Left/Right).
+- **Gyro capture:** optional CSV recording of raw gyro for Vader 4 Pro and Switch Pro
+  controllers, with `tools/vader_gyro_analyze.py` to summarize it.
+
+Measurements and setup notes for the Vader are in [doc/vader4pro-gyro.md](doc/vader4pro-gyro.md).
+In short: PC mode gives analog triggers and every button but coarse 3.9 deg/s gyro steps;
+Switch mode gives fine gyro but on/off triggers and only standard buttons. In Switch mode, hide
+the raw controller with HidHide (allowing DS4Windows) so Windows does not react to it directly.
 
 ## License
 
@@ -32,15 +45,16 @@ available in this source code from the COPYING file.
 
 ## Downloads
 
-- **[Main builds of DS4Windows](https://github.com/schmaldeo/DS4Windows/releases)**
+This fork has no prebuilt releases yet. Build it from source:
 
-## Install
+```powershell
+dotnet build DS4WindowsWPF.sln -c Release -p:Platform=x64
+```
 
-You can install DS4Windows by downloading it from [releases](https://github.com/schmaldeo/DS4Windows/releases) and place it to your preferred place.
+The app is written to `DS4Windows\bin\x64\Release\net8.0-windows\DS4Windows.exe`.
 
-Alternatively, you can install [`ds4windows`](https://scoop.sh/#/apps?q=ds4windows&o=true&id=c8b519fcb06da6bb014569fd0a07521839ec5425) via [Scoop](https://scoop.sh/).
-
-Alternatively, you can download [`ds4w.bat`](https://raw.githubusercontent.com/schmaldeo/DS4Windows/refs/heads/master/ds4w.bat) file and execute it. It will open a window that downloads and places the program in `%LOCALAPPDATA%\DS4Windows` and creates a desktop shortcut to the executable.
+Upstream builds without this fork's changes remain at
+[schmaldeo/DS4Windows releases](https://github.com/schmaldeo/DS4Windows/releases).
 
 ## Requirements
 
