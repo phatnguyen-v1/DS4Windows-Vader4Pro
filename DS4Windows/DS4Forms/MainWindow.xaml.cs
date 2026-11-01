@@ -847,6 +847,26 @@ Suspend support not enabled.", true);
             ChangeService();
         }
 
+        // Stop and start in one task. Two ChangeService calls can overlap: the second
+        // Start would run while Stop is still closing the ViGEm client it just created.
+        public async void RestartService()
+        {
+            ControlService service = App.rootHub;
+            if (!service.running)
+                return;
+
+            StartStopBtn.IsEnabled = false;
+            Task serviceTask = Task.Run(() =>
+            {
+                service.Stop(immediateUnplug: true);
+                service.Start();
+            });
+
+            // Log exceptions that might occur
+            Util.LogAssistBackgroundTask(serviceTask);
+            await serviceTask;
+        }
+
         public async void ChangeService()
         {
             StartStopBtn.IsEnabled = false;

@@ -1034,9 +1034,7 @@ namespace DS4WinWPF.DS4Forms
                 var mainWindow = (MainWindow)Application.Current.MainWindow;
                 if (mainWindow is not null)
                 {
-                    var changeServiceTask = Task.Run(() => Dispatcher.InvokeAsync(mainWindow.ChangeService));
-                    changeServiceTask.ContinueWith(_ => Dispatcher.InvokeAsync(() => mainWindow.ChangeService()));
-
+                    mainWindow.RestartService();
                 }
                 else
                 {
